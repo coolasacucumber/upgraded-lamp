@@ -1,0 +1,210 @@
+---
+title: "Portfolio2Semester3"
+author: "Dumbledore's Army: Astrid, Sebastian, Lisa, Fredrik, Lena"
+date: "24 9 2018"
+output: html_document
+---
+
+```{r}
+
+#libraries
+
+library(plyr)
+library(ggplot2)
+library(stringr)
+library(lmerTest)
+
+
+#Data
+
+Data <- read.csv("First_Assignment_3_Semester.csv")
+Data <- Data[c(2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)] #getting rid of the X-column
+Data <- rename(Data, c("nonVerbalIQ1"="nonVerbalIQ", "verbalIQ1"="verbalIQ"))
+
+
+```
+
+
+#Exercise 1
+```{r, echo = FALSE}
+
+#CREATING TWO GROUPS
+Healthy <- subset(Data, Diagnosis=="TD")
+Autists <- subset(Data, Diagnosis=="ASD")
+
+#ADOS
+#visualizing the two groups (hence x = Diagnosis) regarding the score on ADOS 
+ggplot(Data, aes(x = Diagnosis, y = ADOS1)) + geom_boxplot()
+
+t.test(Healthy$ADOS1 , Autists$ADOS1)
+
+ggplot(Data, aes(x = ADOS1, fill = Diagnosis)) + geom_histogram()
+#it seems there's a great variety within the autist group
+
+#VERBALIQ and NONVERBALIQ
+ls.str(Data)
+#First we visualize the verbalIQ and nonVerbalIQ I'm in charge of
+ggplot(Data, aes(x = Diagnosis, y = verbalIQ)) + geom_boxplot() 
+ggplot(Data, aes(x = Diagnosis, y = nonVerbalIQ)) + geom_boxplot() 
+#Verbal IQ seems asimilar - Let's compare  with a t-test
+t.test(Healthy$verbalIQ,Autists$verbalIQ)
+t.test(Healthy$nonVerbalIQ,Autists$nonVerbalIQ)
+# p = 1.685e-05 vs. p = 0.1525
+#As figured - verbalIQ seems to be a much stronger predictor for Autism than nonVerbalIQ
+ggplot(Data, aes(x = Diagnosis, y = verbalIQ)) + geom_boxplot() + facet_wrap(~Gender)
+ggplot(Data, aes(x = Diagnosis, y = nonVerbalIQ)) + geom_boxplot() + facet_wrap(~Gender)
+
+
+#VISITS
+t.test(Healthy$Visits,Autists$Visits)
+#The two groups do not differ, suggesting that the visits between the two groups are relatively matched
+
+ggplot(Data, aes(x = Diagnosis, y = Visits)) + geom_boxplot() 
+#As for boxplot we see the obvious similarity between the two
+
+
+#NUMBER OF WORDS USED BY MOTHERS
+#testing number of words used (tokens) for mothers
+t.test(Healthy$tokens_MOT,Autists$tokens_MOT)
+#there is no significant difference between the outspokenness of the mothers of the two types of children. Let's see it in a boxplot
+ggplot(Data, aes(x = Diagnosis, y = tokens_MOT)) + geom_boxplot() 
+#again, we see a big overlap between the two categories. The reach for the ASD-condition is slightly wider, with less speech
+
+#NUMBER OF WORDS USED BY CHILDREN
+#testing number of words used (tokens) for children
+t.test(Healthy$tokens_CHI,Autists$tokens_CHI)
+#there is a significant difference in the amount of words used by normal versus autist children, with the normal children having a word count of +50% compared to the autists
+ggplot(Data, aes(x = Diagnosis, y = tokens_CHI)) + geom_boxplot() 
+#The box-plot is showing the distribution of autist children generally producing fewer words than normal children - although with a few outliers in the autists doing well
+
+
+#NUMBER OF UNIQUE WORDS
+types_mother <- t.test(Healthy$types_MOT,Autists$types_MOT)
+types_mother
+types_child <- t.test(Healthy$types_CHI,Autists$types_CHI)
+types_child
+#Boxplot
+ggplot(Data, aes(x = Diagnosis, y = types_MOT)) + geom_boxplot() 
+ggplot(Data, aes(x = Diagnosis, y = types_CHI)) + geom_boxplot()
+
+#LENGTH OF UTTERANCES: CHI & MOT
+MLU_mother <- t.test(Healthy$MOT_MLU,Autists$MOT_MLU)
+MLU_mother
+MLU_child <- t.test(Healthy$CHI_MLU,Autists$CHI_MLU)
+MLU_child
+#Boxplot
+ggplot(Data, aes(x = Diagnosis, y = MOT_MLU)) + geom_boxplot()
+ggplot(Data, aes(x = Diagnosis, y = CHI_MLU)) + geom_boxplot()
+
+
+#GENDER, ETHNICITY, AGE
+ggplot(Data, aes(x = Gender)) + geom_bar() + facet_wrap(~Diagnosis)
+ggplot(Data, aes(x = Ethnicity,)) + geom_bar() + facet_wrap(~Diagnosis)
+ggplot(Data, aes(x = Diagnosis, y = Age)) + geom_boxplot() 
+#t.test
+t.test(Healthy$Age,Autists$Age)
+```
+
+##Exercise 2: Hypothesis: The child's MLU changes: i) over time, ii) according to diagnosis
+```{r, echo = FALSE}
+library(lmerTest)
+
+#BOXPLOT
+boxplot(CHI_MLU ~ Diagnosis + Visits, col=c("brown","pink"),Data)
+
+#CREATING A MODEL inlcuding Diagnosis and Visits (over time)
+model_1 = lmer (CHI_MLU ~ Diagnosis + Visits + (1 + Visits| SUBJ), Data, REML = FALSE)
+summary(model_1)
+
+#NULL MODEL
+null_model = lmer(CHI_MLU ~ Visits + (1 + Visits| SUBJ), Data, REML = FALSE)
+summary (null_model)
+
+#COMPARING NULL AND MODEL_1
+anova(model_1, null_model)
+
+#PLOTTING
+ggplot(Data, aes(x=Visits, y=CHI_MLU, color=Diagnosis))+geom_point()+geom_smooth(method = "lm")
+
+```
+Diagnosis did not effect the MLU of the child as much as we thougth it would over time. Not different from the null_model which only includes Visits as a predictor
+χ2(1)=2.28, p=0.13 (insignificant)
+
+#Growth models
+```{r, echo = FALSE}
+
+#QUADRATIC
+quadratic <- lmer(CHI_MLU ~ Visits + I(Visits^2) + Diagnosis + (1+Visits|SUBJ),Data, REML=FALSE)
+summary(quadratic)
+anova(null_model,quadratic)
+ggplot(Data, aes(x=Visits, y=CHI_MLU, color=Diagnosis))+geom_point()+geom_smooth(method = "lm", formula = y ~ poly(x, 2))
+
+#CUBIC
+cubic <- lmer(CHI_MLU ~ Visits + I(Visits^2) + I(Visits^3) + Diagnosis + (1+Visits + I(Visits^2) + I(Visits^3)|SUBJ), Data, REML=FALSE)
+summary(cubic)
+anova(null_model,cubic)
+ggplot(Data, aes(x=Visits, y=CHI_MLU, color=Diagnosis))+geom_point()+geom_smooth(method = "lm", formula = y ~ poly(x, 3))
+
+#FINAL COMPARISON
+anova(model_1, quadratic, cubic)
+
+#BIC should be lower (Bayseian Information Criteria) -> How probable is it that we get this data with this model -> Is it really worth it adding these parameters/predictors
+#We will use the awesome cubic model
+
+```
+Note to myself: growth models attempt to estimate between-person differences in within-person change. 
+
+
+#Exercise 3
+```{r }
+
+
+#BOXPLOTTING
+boxplot(MOT_MLU ~ Diagnosis + Visits, col=c("brown","pink"),Data)
+
+#CREATING A MODEL
+model_mot = lmer (MOT_MLU ~ Diagnosis + Visits + (1 + Visits| SUBJ), Data, REML = FALSE)
+summary(model_mot)
+
+#NULL MODEL
+null_model_mot = lmer(MOT_MLU ~ Visits + (1 + Visits| SUBJ), Data, REML = FALSE)
+summary (null_model_mot)
+
+#COMPARING NULL AND REAL MODEL
+anova(model_mot, null_model_mot)
+
+
+#PLOTTING
+ggplot(Data, aes(x=Visits, y=MOT_MLU, color=Diagnosis))+geom_point()+geom_smooth(method = "lm")
+
+```
+
+
+
+#Exercise 4
+```{r, echo = FALSE}
+
+#LOOKING FOR PREDICTORS
+cor(Data$types_CHI, Data$tokens_CHI)
+#very high correlation between these two. Supposedly we can just include one. We pick types. The word types are not as dependent on the mood of the kid on the day of visit
+
+#FINAL MODEL
+fresh_model = lmer(CHI_MLU ~ Diagnosis + Visits + types_CHI + verbalIQ + (1 + Visits|SUBJ), Data, REML=FALSE)
+summary(fresh_model)
+
+
+#FINAL TESTING
+anova(fresh_model, null_model)
+
+#very nice p-values and AIC-BIC
+#note: is it OK that we compare our full model (with +4 predictors) to the null-model? Realistically, we cannot know, whether all the predictors have an influence (it could even be in the opposite direction)
+#no malte, we no p-hack we got minds np
+
+names(Data)
+cor <- cor(Data[,9:15])
+install.packages("corrplot")
+library(corrplot)
+corrplot(cor,method="shade", type="upper",tl.cex=0.7, title="Correlated Parameters")
+round(cor, 2) #the number version
+
+```
