@@ -1,0 +1,341 @@
+---
+title: "Assignment 1 - Language Development in ASD - part 3"
+author: "Riccardo Fusaroli"
+date: "August 10, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse) ; library(stringr) ; library(stringi) ; library(pastecs) ; library(WRS2) ; library(sjPlot) ; library(nlme) ; library(plyr)
+
+setwd("~/Downloads")
+
+Data<-read.csv("First_Assignment_3_Semester.CSV")
+#Somehow an extra coloumn sneaked in called 'X' -> So now we'll destroy it
+Data <- Data[c(2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)]
+#We also need to rename some variables:
+Data <- rename(Data, c("nonVerbalIQ1"="nonVerbalIQ","ADOS1"="ADOS","verbalIQ1"="verbalIQ"))
+Healthy <- subset(Data, Diagnosis=="TD")
+Autists <- subset(Data, Diagnosis=="ASD")
+#shouldn't we import token_test rather than train? New dataset for testing
+token_test<-read.csv("token_train.csv")
+LU_test<-read.csv("LU_train.csv")
+demo_test<-read.csv("demo_train.csv")
+
+#What is this code for?
+library("wesanderson")
+names(wes_palettes)
+#pal <- wes_palette("GrandBudapest", 4, type = "discrete")
+
+```
+
+## Welcome to the third exciting part of the Language Development in ASD exercise
+
+In this exercise we will delve more in depth with different practices of model comparison and model selection, by first evaluating your models from last time, then learning how to cross-validate models and finally how to systematically compare models.
+
+N.B. There are several datasets for this exercise, so pay attention to which one you are using!
+
+1. The (training) dataset from last time (the awesome one you produced :-) ).
+2. The (test) datasets on which you can test the models from last time:
+* Demographic and clinical data: https://www.dropbox.com/s/ra99bdvm6fzay3g/demo_test.csv?dl=1
+* Utterance Length data: https://www.dropbox.com/s/uxtqqzl18nwxowq/LU_test.csv?dl=1
+* Word data: https://www.dropbox.com/s/1ces4hv8kh0stov/token_test.csv?dl=1
+
+### Exercise 1) Testing model performance
+
+How did your models from last time perform? In this exercise you have to compare the results on the training data () and on the test data. Report both of them. Compare them. Discuss why they are different.
+
+- recreate the models you chose last time (just write the model code again and apply it to your training data (from the first assignment))
+```{r}
+library(lmerTest)
+#mixed effects models with p-values
+#Nul
+nul.model = lmer( CHI_MLU ~ Visits + (1+Visits|SUBJ), Data, REML=FALSE)
+anova(nul.model,model)
+# p>0.05
+
+#recreating models from previous exercise
+#simple
+linear = lmer( CHI_MLU ~ Visits * Diagnosis + (1+Visits|SUBJ), Data)
+summary(linear)
+coef(linear)
+boxplot(CHI_MLU ~ Diagnosis * Visits, col=c("pink","lightgray"),Data, REML=FALSE)
+ggplot(Data, aes(x=Visits, y=CHI_MLU, color=Diagnosis))+geom_point()+geom_smooth(method = "lm")
+
+#Quadratic
+quadratic <- lmer(CHI_MLU ~ (Visits + I(Visits^2)) * Diagnosis + (1+Visits|SUBJ),Data, REML=FALSE)
+summary(quadratic)
+anova(nul.model,quadratic)
+ggplot(Data, aes(x=Visits, y=CHI_MLU, color=Diagnosis))+geom_point()+geom_smooth(method = "lm", formula = y ~ poly(x, 2))
+
+#Complex model
+#Total word count in the children; verbal IQ; unique words used for both mothers and children; mean length of utterance.
+#Checking for overtly correlated variables
+names(Data)
+cor <- cor(Data[,9:15])
+library(corrplot)
+corrplot(cor,method="shade", type="upper",tl.cex=0.7, title="Correlated Parameters")
+#There appears to be a high correlation between types of words and tokens. Supposedly we can just include one. We pick types. The word types are not as dependent on the mood of the kid on the day of visit
+cor(Data$types_CHI, Data$tokens_CHI)
+
+
+#And adding random effects.
+#And of course still including time (visits) and diagnosis.
+complex_model = lmer(CHI_MLU ~ Diagnosis * (Visits + I(Visits^2)) + types_CHI + verbalIQ + (1 + Visits|SUBJ), Data, REML=FALSE)
+summary(complex_model)
+
+#comparing our complex model to the null-model. Alternative way of testing explanatory power - read also next section
+anova(nul.model,complex_model)
+
+list(RMSETest)
+```
+- calculate performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
+```{r}
+library(ModelMetrics)
+Train_predict_linear <- predict(linear)
+#comparing CHI_MLU to the linear model (mean error)
+rmse(Data$CHI_MLU,Train_predict_linear)
+#mean error 0.35
+Train_predict_quadratic <- predict(quadratic)
+rmse(Data$CHI_MLU,Train_predict_quadratic)
+#quadratic model mean error 0.32
+Train_predict_qcomplex <- predict(complex_model)
+rmse(Data$CHI_MLU,Train_predict_qcomplex)
+#complex model mean error 0.30
+```
+- create the test dataset (apply the code from assignment 1 part 1 to clean up the 3 test datasets)
+```{r}
+Testdata <- read.csv("A1_Part3_Test_Data.CSV") #this is already cleaned up data
+Testdata <- Testdata[c(2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)] #getting rid of the X-column
+```
+
+- test the performance of the models on the test data (Tips: google the functions "predict()")
+```{r}
+#We Are Down To The Marginal, from the conditional
+#now testing model performance in prediction power by comparing test set to models based on training set
+rmse(Testdata$CHI_MLU, Train_predict_linear)
+#We are 0.986 points (mean error) away on the Chi_MLU
+rmse(Testdata$CHI_MLU,Train_predict_quadratic)
+#We are 0.991 points away on the Chi_MLU
+rmse(Testdata$CHI_MLU,Train_predict_qcomplex)
+#We are 0.980 points away on the Chi_MLU
+#Size of the error -> We expect all of our predictions to be off by 0.98 points
+#Our model is not as accurate on the test data as on the training data, which is to be expected. This is partly due to loss of "knowledge" from the random effects, and partly from overfitting the data when creating the model
+```
+
+- optional: predictions are never certain, can you identify the uncertainty of the predictions? (e.g. google predictinterval())
+```{r}
+```
+
+formatting tip: If you write code in this document and plan to hand it in, remember to put include=FALSE in the code chunks before handing in.
+
+[HERE GOES YOUR ANSWER]
+
+### Exercise 2) Model Selection via Cross-validation (N.B: ChildMLU!)
+
+One way to reduce bad surprises when testing a model on new data is to train the model via cross-validation. 
+
+In this exercise you have to use cross-validation to calculate the predictive error of your models and use this predictive error to select the best possible model.
+
+- Use cross-validation to compare your model from last week with the basic model (Child MLU as a function of Time and Diagnosis, and don't forget the random effects!)
+- (Tips): google the function "createFolds";  loop through each fold, train both models on the other folds and test them on the fold)
+
+```{r}
+
+#### The simple model
+library(caret)
+#Unique makes sure that the same child is divided into the same fold all the time
+folds <- createFolds(unique(Data$SUBJ),k=5)
+#Set a counter
+n = 1
+RMSETrain = NULL
+RMSETest = NULL
+
+for(f in folds){
+  TrainSet = subset(Data,!(SUBJ %in% f))
+  TestSet = subset(Data,(SUBJ %in% f))
+  Model_simple = lmer(CHI_MLU ~ Visits * Diagnosis + (1+Visits|SUBJ),TrainSet, REML=FALSE)
+  Train_predict_Q <- predict(Model_simple)
+  Test_predict_Q <- predict(Model_simple, newdata=TestSet, allow.new.levels=TRUE)
+  RMSETrain[n] = rmse(TrainSet$CHI_MLU,Train_predict_Q)
+  RMSETest[n] = rmse(TestSet$CHI_MLU,Test_predict_Q)
+  n = n+1}
+
+mean(RMSETrain) #0.35
+mean(RMSETest) #0.74
+
+#### Complex model
+folds2 <- createFolds(unique(Data$SUBJ),k=5)
+#Set a counter
+n2 = 1
+RMSETrain2 = NULL
+RMSETest2 = NULL
+
+for(f in folds2){
+  TrainSet2 = subset(Data,!(SUBJ %in% f))
+  TestSet2 = subset(Data,(SUBJ %in% f))
+  Model_complex2 = lmer(CHI_MLU ~ Diagnosis * Visits + types_CHI + verbalIQ + (1 + Visits|SUBJ),  TrainSet2, REML=FALSE)
+  Train_predict_Q2 <- predict(Model_complex2)
+  Test_predict_Q2 <- predict(Model_complex2, newdata=TestSet2, allow.new.levels=TRUE)
+  RMSETrain2[n2] = rmse(TrainSet2$CHI_MLU,Train_predict_Q2)
+  RMSETest2[n2] = rmse(TestSet2$CHI_MLU,Test_predict_Q2)
+  n2 = n2+1}
+
+mean(RMSETrain2) #0.31
+mean(RMSETest2) #0.44
+
+folds3 <- createFolds(unique(Data$SUBJ),k=5)
+#Set a counter
+n3 = 1
+RMSETrain3 = NULL
+RMSETest3 = NULL
+
+for(f in folds3){
+  TrainSet3 = subset(Data,!(SUBJ %in% f))
+  TestSet3 = subset(Data,(SUBJ %in% f))
+  Model_complex3 = lmer(CHI_MLU ~ Diagnosis * (Visits + I(Visits^2)) + types_CHI + verbalIQ + (1 + Visits|SUBJ), TrainSet3, REML=FALSE)
+  Train_predict_Q3 <- predict(Model_complex3)
+  Test_predict_Q3 <- predict(Model_complex3, newdata=TestSet3, allow.new.levels=TRUE)
+  RMSETrain3[n3] = rmse(TrainSet3$CHI_MLU,Train_predict_Q3)
+  RMSETest3[n3] = rmse(TestSet3$CHI_MLU,Test_predict_Q3)
+  n3 = n3+1}
+
+mean(RMSETrain3) #0.30
+mean(RMSETest3) #0.45
+
+#The models last week all performed about equally well in regard to prediction power, and thus we would lean towards the simpler model.
+#Running cross-validation, however, the results are different. The prediction power is improved for all three models, however the simple model can no longer keep up with the other two models.
+#Not only is the model selected via cross-validation better at predicting new data - it is also slightly more accurate in predictions on training data (quadratic and complex model)
+
+
+#What seems to be the case is that our complex, that gave us a better value last time, also is better at predicting the testdata this week. Adding the extra "marginal" predictors means that we can predict new data, and not just the training data. In our simple model we only include idiosyncratic conditional predictors
+list(RMSETest)
+list(RMSETest2)
+list(RMSETest3)
+
+
+- Report the results and comment on them.
+# The simple models 5-fold RMSE prediction results on the testdata
+#0.6464130 0.9917956 0.7021935 0.6935117 0.6737272
+#mean 0.73
+# The quadratic models 5-fold RMSE prediction results on the testdata
+#0.5195405 0.3772702 0.4658645 0.4136145 0.4227087
+#mean 0.44
+# The complex models 5-fold RMSE prediction results on the testdata
+#0.5114390 0.3435340 0.4657327 0.4758723 0.4449779
+#mean 0.45
+
+#OCCAMS RAZOR -> A simpler model is a better model. Thus, we stick with the quadratic model rather than the complex model 
+
+
+#- Now try to find the best possible predictive model of ChildMLU, that is, the one that produces the best cross-validated results.
+folds4 <- createFolds(unique(Data$SUBJ),k=5)
+#Set a counter
+n4 = 1
+RMSETrain4 = NULL
+RMSETest4 = NULL
+
+for(f in folds4){
+  TrainSet4 = subset(Data,!(SUBJ %in% f))
+  TestSet4 = subset(Data,(SUBJ %in% f))
+  Model_complex4 = lmer(CHI_MLU ~ Diagnosis * (Visits + I(Visits^2)) + Gender + CHI_LUstd + types_CHI + verbalIQ + (1 + Visits|SUBJ), TrainSet4, REML=FALSE)
+  Train_predict_Q4 <- predict(Model_complex4)
+  Test_predict_Q4 <- predict(Model_complex4, newdata=TestSet4, allow.new.levels=TRUE)
+  RMSETrain4[n4] = rmse(TrainSet4$CHI_MLU,Train_predict_Q4)
+  RMSETest4[n4] = rmse(TestSet4$CHI_MLU,Test_predict_Q4)
+  n4 = n4+1}
+list(RMSETest4)
+mean(RMSETest4)
+
+mean(RMSETrain4)
+#SUPER DUPER scores
+#AWESOME
+#0.3008561 0.3219745 0.3862985 0.3416712 0.3639696
+#mean 0.34
+```
+
+- Bonus Question 1: What is the effect of changing the number of folds? Can you plot RMSE as a function of number of folds?
+- Bonus Question 2: compare the cross-validated predictive error against the actual predictive error on the test data
+
+[HERE GOES YOUR ANSWER]
+
+### Exercise 3) Assessing the single child
+
+Let's get to business. This new kiddo - Bernie - has entered your clinic. This child has to be assessed according to his group's average and his expected development.
+
+Bernie is one of the six kids in the test dataset, so make sure to extract that child alone for the following analysis.
+
+You want to evaluate:
+
+- how does the child fare in ChildMLU compared to the average TD child at each visit? Define the distance in terms of absolute difference between this Child and the average TD.
+(Tip: recreate the equation of the model: Y=Intercept+BetaX1+BetaX2, etc; input the average of the TD group  for each parameter in the model as X1, X2, etc.).
+```{r}
+#subsetting healthy children
+TD_test <-subset (Testdata, Diagnosis == "TD") #subsetting healthy children from the test-set
+TD_test <- dplyr::select(TD_test, Visits, SUBJ, CHI_MLU) #specifying appropriate columns
+
+Data2 <- subset(Data, Diagnosis == "TD") #subsetting healthy children from the training-set
+Data2 <- dplyr::select(Data2, Visits, SUBJ, CHI_MLU)
+
+TD <-rbind(Data2, TD_test) #binding all the healthy children in one data-set
+
+#re-introducing Bernie
+BernieIsBack <- read.csv("Berniegothisnameback.CSV")
+Bernieonly <- subset(BernieIsBack, SUBJ == "Bernie") #subsetting subject Bernie
+Bernieonly <- Bernieonly [c(2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18)] #removing additional x-column
+Bernie <- dplyr::select(Bernieonly, Visits, SUBJ, CHI_MLU)
+
+#creating simple model
+td <- lm(CHI_MLU ~ Visits , TD)
+
+Bernie$Estimate <- predict(td, newdata = Bernie)
+Bern <- dplyr::select(Bernie, Visits, Estimate)
+Bern$CHI_MLU <- Bern$Estimate
+
+ggplot(Data2, aes(x=Visits, y=CHI_MLU, color="red"))+geom_point()+geom_smooth(method = "lm") + geom_point(data = Bernieonly, color = "blue") + geom_point(data = Bern, color = "green")
+
+#subtracting TD-means from Bernie for each visit
+Visit1 <- subset(TD, Visits == "1")
+1.984456-mean(Visit1$CHI_MLU)
+
+Visit2 <- subset(TD, Visits == "2")
+2.544444-mean(Visit2$CHI_MLU)
+
+Visit3 <- subset(TD, Visits == "3")
+3.353191-mean(Visit3$CHI_MLU)
+
+Visit4 <- subset(TD, Visits == "4")
+3.183099-mean(Visit4$CHI_MLU)
+
+Visit5 <- subset(TD, Visits == "5")
+3.173252-mean(Visit5$CHI_MLU)
+
+Visit6 <- subset(TD, Visits == "6")
+3.448413-mean(Visit6$CHI_MLU)
+
+```
+
+
+- how does the child fare compared to the model predictions at Visit 6? Is the child below or above expectations? (tip: use the predict() function on Bernie's data only and compare the prediction with the actual performance of the child)
+```{r}
+#Bernie vs. Model's prediction
+#Lena's sneaky and simply extracting values
+3.448413-3.226528
+```
+
+```
+
+### OPTIONAL: Exercise 4) Model Selection via Information Criteria
+Another way to reduce the bad surprises when testing a model on new data is to pay close attention to the relative information criteria between the models you are comparing. Let's learn how to do that!
+
+Re-create a selection of possible models explaining ChildMLU (the ones you tested for exercise 2, but now trained on the full dataset and not cross-validated).
+
+Then try to find the best possible predictive model of ChildMLU, that is, the one that produces the lowest information criterion.
+
+- Bonus question for the optional exercise: are information criteria correlated with cross-validated RMSE? That is, if you take AIC for Model 1, Model 2 and Model 3, do they co-vary with their cross-validated RMSE?
+
+### OPTIONAL: Exercise 5): Using Lasso for model selection
+
+Welcome to the last secret exercise. If you have already solved the previous exercises, and still there's not enough for you, you can expand your expertise by learning about penalizations. Check out this tutorial: http://machinelearningmastery.com/penalized-regression-in-r/ and make sure to google what penalization is, with a focus on L1 and L2-norms. Then try them on your data!
+
