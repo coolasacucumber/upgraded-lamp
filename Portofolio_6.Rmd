@@ -1,0 +1,238 @@
+---
+title: "Portfolio_3_Schizo_2"
+author: "Lena"
+date: "26 10 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r }
+
+```
+
+
+## Assignment 3 - Diagnosing schizophrenia from voice
+
+In the previous part of the assignment you generated a bunch of "features", that is, of quantitative descriptors of voice in schizophrenia, focusing on pitch.
+In the course of this assignment we will use them to try to automatically diagnose schizophrenia from voice only, that is, relying on the set of features you produced last time, we will try to produce an automated classifier.
+
+### Question 1: Can you diagnose schizophrenia from pitch range only? If so, how well?
+
+Build a logistic regression to see whether you can diagnose schizophrenia from pitch range only.
+Calculate the different performance measures (accuracy, sensitivity, specificity, PPV, NPV, ROC curve) on a logistic regression using the full dataset. Don't forget the random effects!
+
+```{r }
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse) ; library(stringr) ; library(stringi) ; library(pastecs) ; library(WRS2) ; library(sjPlot) ; library(nlme) ; library(plyr) ; library(lmerTest) ; library(pacman) 
+p_load(tidyverse, stringr, Metrics, caret, lme4, simr, stats,lmerTest, stats, FinCal, PerformanceAnalytics, nonlinearTseries,purrr)
+###
+setwd("~/Downloads")
+Data<-read.csv("pitch_data.csv")
+
+#building a general linear model with study as a random intercept because we found out that there's a significant interaction between diagnosis and study in the last portfolio, however, we want to be able to predict diagnosis no matter the study, that's why we added it as a random effect
+
+lr <- glmer(diagnosis ~ range + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(lr)
+
+#min max scaling so all values are between 1 and 0 
+Data$MinMaxMean = (Data$mean-min(Data$mean))/(max(Data$mean)-min(Data$mean))
+Data$MinMaxsd = (Data$sd-min(Data$sd))/(max(Data$sd)-min(Data$sd))
+Data$MinMaxMin = (Data$min-min(Data$min))/(max(Data$min)-min(Data$min))
+Data$MinMaxMax = (Data$max-min(Data$max))/(max(Data$max)-min(Data$max))
+Data$MinMaxMedian = (Data$median-min(Data$median))/(max(Data$median)-min(Data$median))
+Data$MinMaxiqr = (Data$iqr-min(Data$iqr))/(max(Data$iqr)-min(Data$iqr))
+Data$MinMaxMad = (Data$mad-min(Data$mad))/(max(Data$mad)-min(Data$mad))
+Data$MinMaxMean = (Data$mean-min(Data$mean))/(max(Data$mean)-min(Data$mean))
+Data$MinMaxCoefvar = (Data$coefvar-min(Data$coefvar))/(max(Data$coefvar)-min(Data$coefvar))
+Data$MinMaxRange = (Data$range-min(Data$range))/(max(Data$range)-min(Data$range))
+
+#confusion matrix also known as error matrix, visualizing the performance of an algorithm
+
+Data$PredictionsPerc=predict(lr)
+Data$ActualPerc <- inv.logit(Data$PredictionsPerc)
+Data$Predictions[Data$ActualPerc>0.5]="1" #schizo
+Data$Predictions[Data$ActualPerc<0.5]="0" #non-schizophrenic
+  
+confusionMatrix(data  =  Data$Predictions,  reference  =  Data$diagnosis, positive = "0")
+#Accuracy of the range model : 0.6094
+
+p_load(pROC)
+library(pROC)  
+rocCurve  <-  roc(response  =  Data$diagnosis,      predictor  =  Data$PredictionsPerc)  
+auc(rocCurve)  #area under the curve, WHAT DOES IT MEAN?
+ci  (rocCurve) #confidence intervals
+plot(rocCurve, legacy.axes =  TRUE)   
+
+
+
+```
+
+
+Then cross-validate the logistic regression and re-calculate performance on the testing folds. N.B. The cross-validation functions you already have should be tweaked: you need to calculate these new performance measures.
+
+```{r }
+
+#### Crossvalidation
+
+
+#paired control group means that they have some shared variance, subjectpair as a random effect
+
+#not working loop
+library(caret)
+#Unique makes sure that the same child is divided into the same fold all the time
+folds <- createFolds(unique(Data$subject),k=5)
+#Set a counter
+n = 1
+Prob_Train_predict_Q = NULL
+Schi_pred_train = NULL
+Prob_Test_predict_Q = NULL
+Schi_pred_test = NULL
+
+for(f in folds){
+  TrainSet = subset(Data,!(subject %in% f))
+  TestSet = subset(Data,(subject %in% f))
+  Model_simple = glmer(diagnosis ~ MinMaxRange + (1+trial|subject) + (1|study),TrainSet,family= "binomial")
+  Train_predict_Q <- predict(Model_simple)
+  Test_predict_Q <- predict(Model_simple, newdata=TestSet, allow.new.levels=TRUE)
+  Prob_Train_predict_Q[n] <- inv.logit(Train_predict_Q)
+  Prob_Test_predict_Q[n] <- inv.logit(Test_predict_Q)
+  Schi_pred_train[n] = ifelse(Prob_Train_predict_Q > 0.5 == 1,0)
+  Schi_pred_test[n] <- ifelse(Prob_Test_predict_Q > 0.5 == 1,0)
+  n = n+1
+}
+
+```
+
+
+
+N.B. the predict() function generates log odds (the full scale between minus and plus infinity). Log odds > 0 indicates a choice of 1, below a choice of 0.
+N.B. you need to decide whether calculate performance on each single test fold or save all the prediction for test folds in one datase, so to calculate overall performance.
+N.B. Now you have two levels of structure: subject and study. Should this impact your cross-validation?
+using study as a unique thingy for the folds would help us see if our model training on some of the studies tested on one of them is generalizable
+
+### Question 2 - Which single acoustic predictor is the best predictor of diagnosis?
+
+```{r }
+
+lr <- glmer(diagnosis ~ range + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(lr)
+#AIC 1859.4   BIC 1890.6  Loglik -923.7 
+
+mean_model <- glmer(diagnosis ~ mean + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(mean_model)
+#AIC 1841.8    BIC 1873.0  Loglik -914.9
+
+sd_model <- glmer(diagnosis ~ sd + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(sd_model)
+#intercept is not significant
+
+median_model <- glmer(diagnosis ~ median + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(median_model)
+#AIC 1851.5   BIC 1882.7   Loglik -919.8
+
+iqr_model <- glmer(diagnosis ~ iqr + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(iqr_model)
+#intercept is not signficiant 
+#The interquartile range of an observation variable is the difference of its upper and lower quartiles. It is a measure of how far apart the middle portion of data spreads in value.
+
+mad_model <- glmer(diagnosis ~ mad + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(mad_model)
+#median absolute deviation, compared to sd where outliers way heavy because they are squared as the rest of the data, in the MAD, the deviations of a small number of outliers are irrelevant.
+#AIC 1824.3   BIC 1855.5  loglikelihood -906.2
+
+#Mean model and mad model have the lowest AIC, BIC and loglikelihood scores, that's why we decided to have a look at the models accuracy etc. with the help of a confusion matrix
+#MAD_MODEL
+Data3 <- Data
+Data3$PredictionsPerc=predict(mad_model)
+Data3$ActualPerc <- inv.logit(Data3$PredictionsPerc)
+Data3$Predictions[Data3$ActualPerc>0.5]="1" #schizo
+Data3$Predictions[Data3$ActualPerc<0.5]="0" #non-schizophrenic
+
+confusionMatrix(data  =  Data3$Predictions,  reference  =  Data3$diagnosis, positive = "0")
+#Accuray for our MAD-model: 0.6288
+
+
+#MEAN-MODEL
+Data4 <- Data
+Data4$PredictionsPerc=predict(mean_model)
+Data4$ActualPerc <- inv.logit(Data4$PredictionsPerc)
+Data4$Predictions[Data4$ActualPerc>0.5]="1" #schizo
+Data4$Predictions[Data4$ActualPerc<0.5]="0" #non-schizophrenic
+
+confusionMatrix(data  =  Data4$Predictions,  reference  =  Data4$diagnosis, positive = "0")
+#Accuracy for the mean_model: 0.6751
+
+#MEDIAN-MODEL
+Data5 <- Data
+Data5$PredictionsPerc=predict(median_model)
+Data5$ActualPerc <- inv.logit(Data5$PredictionsPerc)
+Data5$Predictions[Data5$ActualPerc>0.5]="1" #schizo
+Data5$Predictions[Data5$ActualPerc<0.5]="0" #non-schizophrenic
+
+confusionMatrix(data  =  Data5$Predictions,  reference  =  Data5$diagnosis, positive = "0")
+#Accuracy for the median_model: 0.6527 
+
+```
+After consulting the AICs, BICs and Loglikelihood (when p-values are significant), it seems that the median absoluate deviation is the best acoustic feature to predict schizophrenia. However, after looking at model's accuracy our best guess is the mean_model with an accuracy of 0.6751, but slightly lower AIC and BIC scores than the median's model. 
+
+
+### Question 3 - Which combination of acoustic predictors is best for diagnosing schizophrenia?
+
+Now it's time to go wild! Use all (voice-related) variables and interactions you can think of. Compare models and select the best performing model you can find.
+
+Remember:
+- Out-of-sample error crucial to build the best model!
+- After choosing the model, send Malte and Riccardo the code of your model
+
+```{r }
+#P-HACKING
+
+full_model <- glmer(diagnosis ~ mean + range + min + max + sd + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(full_model)
+
+Data6 <- Data
+Data6$PredictionsPerc=predict(full_model)
+Data6$ActualPerc <- inv.logit(Data6$PredictionsPerc)
+Data6$Predictions[Data6$ActualPerc>0.5]="1" #schizo
+Data6$Predictions[Data6$ActualPerc<0.5]="0" #non-schizophrenic
+
+confusionMatrix(data  =  Data6$Predictions,  reference  =  Data6$diagnosis, positive = "0")
+
+#Accuracy: 0.7162  
+#Sensitivity : 0.7575          
+#Specificity : 0.6756  
+
+library(lmerTest)
+Double_Trouble <- glmer(diagnosis ~ MinMaxMean+MinMaxMad + (1 + trial | subject) + (1 | study), Data, family = "binomial")
+summary(Double_Trouble)
+
+Data$PredictionsPerc=predict(Double_Trouble)
+Data$ActualPerc <- inv.logit(Data$PredictionsPerc)
+Data$Predictions[Data$ActualPerc>0.5]="1" #schizo
+Data$Predictions[Data$ActualPerc<0.5]="0" #non-schizophrenic
+Data$Predictions <- as.factor(Data$Predictions)
+Data$diagnosis <- as.factor(Data$diagnosis)
+confusionMatrix(data  =  Data$Predictions,  reference  =  Data$diagnosis, positive = "0")
+
+
+
+```
+
+
+### Question 4: Properly report the results
+
+METHODS SECTION: how did you analyse the data? That is, how did you extract the data, designed the models and compared their performance?
+
+RESULTS SECTION: can you diagnose schizophrenia based on voice? which features are used? Comment on the difference between the different performance measures.
+
+
+### Bonus question 5
+
+You have some additional bonus data involving speech rate, pauses, etc. Include them in your analysis. Do they improve classification?
+
+### Bonus question 6
+
+Logistic regression is only one of many classification algorithms. Try using others and compare performance. Some examples: Discriminant Function, Random Forest, Support Vector Machine, etc. The package caret provides them.
