@@ -88,6 +88,7 @@ mtext(concat("N = ",N))
 for ( i in 1:50 )
     abline( a=post$a[i] , b=post$b[i] , col=col.alpha("black",0.3) )
 
+
 ```
 
 
@@ -235,22 +236,58 @@ for ( i in 1:50 )
 
 
 2. Do the different aspects of IQ account for different portions of the variance in ADOS?
-```{r testing correlation}
-cor.test(d1$VerbalIQ, d1$NonVerbalIQ)
-
-cor.test(d1$VerbalIQ, d1$SocialIQ)
-
-cor.test(d1$SocialIQ, d1$NonVerbalIQ)
-#all correlated
-
-```
 
 2.1. Does it make sense to have all IQ measures in the same model? First write a few lines answering the question and motivating your answer, including a discussion as to what happens when you put all of them in the same model. Then build a model following your answer. If your answer is "no", you are not free, you still have to answer: are there alternative ways of answering the question?
 
 2.2. Build the model, assess its quality, write a few lines interpreting the results.
 ```{r 2.2. model}
 
-#see Seb's code
+# 2. correlation between measures 
+#Verbal and social
+cor.test(d$VerbalIQ, d$SocialIQ, method = "pearson")
+
+(0.6102297)^2
+
+scatter1 <- ggplot(d, aes(VerbalIQ, SocialIQ)) + geom_point() +
+geom_smooth(method = "lm") 
+scatter1
+
+#Verbal and nonverbal 
+cor.test(d$NonVerbalIQ, d$VerbalIQ, method = "pearson")
+
+(0.6759356)^2
+
+scatter2 <- ggplot(d, aes(VerbalIQ, NonVerbalIQ)) + geom_point() +
+geom_smooth(method = "lm") 
+scatter2
+
+#Nonverbal and social
+cor.test(d$NonVerbalIQ, d$SocialIQ, method = "pearson")
+
+(0.3747165)^2
+
+scatter3 <- ggplot(d, aes(NonVerbalIQ, SocialIQ)) + geom_point() +
+geom_smooth(method = "lm") 
+scatter3
+
+
+# 2.2 Model with all measures 
+m2.2 <- map( 
+  alist(
+ADOS ~ dnorm( mu , sigma ) ,
+mu <- a + v*VerbalIQ + nv*NonVerbalIQ + s*SocialIQ , 
+a ~ dnorm( 10 , 100 ) ,
+v ~ dnorm( -1 , 0.9 ) ,
+nv ~ dnorm( -1 , 0.9 ) ,
+s ~ dnorm( -1 , 0.9 ) ,
+sigma ~ dunif( 0 , 30 )
+),
+data=d )
+
+precis(m2.2)
+
+plot( precis(m2.2) )
+
 
 ```
 
@@ -258,17 +295,43 @@ cor.test(d1$SocialIQ, d1$NonVerbalIQ)
 # Yes: ASD is not binary. Some children might lean towards ASD, but be categorized TD.
 #ADOS is, afterall, symptom severity. A continunous scale. We are interested in seeing ADOS predicting IQ [thus, IQ ~ ADOS]
 
+```{r}
+data <- d
+lol <- lm(VerbalIQ~ADOS,data)
+lol1 <- ggplot(data, aes(x=VerbalIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD)) + geom_smooth(method = "lm",formula = y ~ x + I(x^2))
+lol1 + scale_x_continuous(limits = c(5, 35))
+#Floor effect for variation in the TD group - Can't be "minus" autistic
+
+loll <- lm(SocialIQ~ADOS,data)
+lol2 <- ggplot(data, aes(x=SocialIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD)) + geom_smooth(method = "lm",formula = y ~ x + I(x^2))
+lol2 + scale_y_continuous(limits = c(0, 30))
+#
+lolll <- lm(NonVerbalIQ~ADOS,data)
+lol3 <- ggplot(data, aes(x=NonVerbalIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD),se = F) + geom_smooth(method = "lm")
+lol3 + scale_x_continuous(limits = c(12, 36))
+```
+
 4. Let's discuss contents:
 4.1. You have three scores for IQ, do they show shared variance? Is that the same in TD and ASD? What does that tell us about IQ?
 ```{r 4.1. Testing shared variance in IQ-scores}
 #Testing correlation and covariates
-cor.test(d1$VerbalIQ, d1$NonVerbalIQ)
+data.1 <- d1
+data_TD <- d2
+
+cor.test(data.1$VerbalIQ, data.1$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
+cor.test(data.1$VerbalIQ, data.1$NonVerbalIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
+cor.test(data.1$NonVerbalIQ, data.1$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
+0.61^2 #0.37
+0.68^2 #0.46
+0.37^2 # 0.14
+cor.test(data_TD$VerbalIQ, data_TD$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
+cor.test(data_TD$VerbalIQ, data_TD$NonVerbalIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
+cor.test(data_TD$NonVerbalIQ, data_TD$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
+0.20^2 #0.04
+0.55^2 #0.3
+0.06^2 #0.004
 
 
-
-lm(NonVerbalIQ ~ ADOS, d1)
-lm(VerbalIQ ~ ADOS, d1)
-lm(SocialIQ ~ ADOS, d1)
 
 
 ```
