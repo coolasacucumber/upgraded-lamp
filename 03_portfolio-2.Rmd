@@ -7,13 +7,18 @@ output: html_document
 
 ```{r loading}
 pacman:: p_load(rethinking, corrplot)
-library(rethinking)
+library(rethinking, bayesplot)
 
 setwd('~/upgraded-lamp')
 d <- read.csv('Assignment3Data.csv') 
 
-d1 <- subset(d, d$ASD == 1 & d$Visit == 1) #subsetting ASD-participants and visit 1
-d2 <- subset(d, d$ASD == 0 & d$Visit == 1) #subsetting TD-participants and visit 1
+#only Visit 1
+d1 <- subset(d, d$ASD == 1 & d$Visit == 1 & d$ADOS > 0) #subsetting ASD-participants and visit 1 #what is this one kid with zero ADOS doing in our ASD data #go away plz
+d2 <- subset(d, d$ASD == 0 & d$Visit == 1 ) #subsetting TD-participants and visit 1 
+
+#For later use
+d3 <- subset(d, d$Visit == 1 )
+
 
 #testing difference in ADOS between the two groups
 t.test(d1$ADOS, d2$ADOS)
@@ -32,312 +37,555 @@ The data consists of ChildID, gender, age, diagnosis (ASD), symptom severity (AD
 The questions you will have to answer are:
 
 01. Assess the relation between symptom severity and IQ (focus on visit 1 and children with ASD) and report 1) the model, 2) a plot of the model, and 3) a couple of lines describing the quality of the model and interpreting the results.
-# Predictions:
-# Wider range for Verbal IQ in ASD >< TD
-# Higher Non Verbal IQ in ASD >< TD
-# Lower social IQ in ASD >< 
 
 P.S. Should you scale?
 P.P.S. Don't forget to motivate your priors. See: predictions
 
-1.1. Verbal IQ and ADOS
+#1.1. Verbal IQ and ADOS
 ```{r inspecting data}
 
 dens(d1$VerbalIQ)
+
 ```
-The data has two maxima, so we might have to perform a transformation.
-Log-transforming is an option
+The data has two peaks, so we might have to perform a transformation.
+Log-transforming is an option, when log-transforming, the data suddenly has three peaks, so we decided on just scaling
 
-#Verbal IQ and ADOS
 ```{r 1.1. verbal IQ and ADOS: Setting prior}
+###SCALING
+VerbalIQ_scale <- d1 
+VerbalIQ_scale$VerbalIQ <- scale(d1$VerbalIQ) #scaling: it centers the mean around 0 and makes its sd 1
+VerbalIQ_scale$ADOS <- scale(d1$ADOS)
 
-VerbalIQ_log <- d1
-VerbalIQ_log$VerbalIQ <- log(data_1$VerbalIQ)
-dens(VerbalIQ_log$VerbalIQ)
+###DENSITY PLOT
+dens(VerbalIQ_scale$ADOS)
 
-#VerbalIQ
+###BUILDING THE MODEL
 verbal_m <- rethinking::map(
   alist(
-    VerbalIQ ~ dnorm (mu, sigma),
-    mu <- a + b* ADOS,
-    a ~ dnorm (2.6, 0.5),#we expect the kids to lie somewhere at 2.6 (mean), and range from 2.0 to 3.5 #what is the expected verbal IQ when x = 0, intercept
-    b ~ dnorm (-0.1, 0.05), #what is the change in expected verbal iq when x1 changes by 1 unit -> ß, steigung, we expect the beta to be negative, and for one unit of ADOS it is probably rather small (we actually ran a linear model to get a hang of it)
-    sigma ~ dunif (0, 0.9) #confusion, it's standard deviation, must be positve -> that's why bounding it to zero makes sense (apparently???), in the height case -> it means 0, 50 that 95% of the individual heights lie within 100cm of the average height, 
+    ADOS ~ dnorm (mu, sigma),
+    mu <- a + b* VerbalIQ,
+    a ~ dnorm (0, 5), #the mean of Verbal IQ is centered around 0 after scaling that is why we set it to (0, 5), the scaling sets the standard deviation to 1 so setting it to 5 makes it incredibly weak, and we don't have (except for the data we are using in this model) any prior knowledge we can use for informing this prior
+    b ~ dnorm (-0.1, 5), #what is the change in expected verbal iq when x1 changes by 1 unit -> ß, slope, we expect beta to be negative, because we expect the following the higher the ADOS the lower the Verbal IQ, we set this to a very small number though, because be can't base this knowledge on actual data, but rather our "knowledge" about the world (autism)
+    sigma ~ dunif (0, 5) #bounding it to zero, and again a very big standard deviation -> another weak prior
   ), 
-  data = VerbalIQ_log1)
+  data = VerbalIQ_scale)
 
-VerbalIQ_log1 <- subset(VerbalIQ_log, VerbalIQ_log$ADOS > 0) #what is this one kid with zero ADOS doing in our ASD data #go away plz
-plot(VerbalIQ ~ ADOS, data = VerbalIQ_log1)
+#Estimates
+precis(verbal_m)
+
+
+###PLOTTING POSTERIOR WITH ACTUAL DATA
+##PLOT 1
+plot(ADOS ~ VerbalIQ, data = VerbalIQ_scale)
 abline(a=coef(verbal_m)["a"], b=coef(verbal_m)["b"])
-
- post <- extract.samples(verbal_m)
- post[1:5,] #expecting five rows
-
- #function
-N <- 50
-dN <- VerbalIQ_log1[ 1:N , ]
-
-# extract 20 samples from the posterior
+##PLOT 2
+post <- extract.samples(verbal_m)
+post[1:5,] #expecting five rows
+#function
+N <- 30
+dN <- VerbalIQ_scale[ 1:N , ]
+# extract 20 samples from the posterior #the MAP line is just the posterior mean, the most plausible line in the universe of infinite lines that the posterior distribution has considered, so plotting uncertainty makes a lot of sense, it could be that there are many lines with nearly the same posterior probability
 post <- extract.samples( verbal_m , n=50 )
 # display raw data and sample size
-plot( dN$ADOS , dN$VerbalIQ,
-    xlim=range(VerbalIQ_log1$ADOS) , ylim=range(VerbalIQ_log1$VerbalIQ) ,
+plot( dN$VerbalIQ , dN$ADOS,
+    xlim=range(VerbalIQ_scale$VerbalIQ) , ylim=range(VerbalIQ_scale$ADOS) ,
+    col=rangi2 , xlab="ADOS" , ylab="VerbalIQ" )
+mtext(concat("N = ",N))
+# plot the lines, with transparency
+for ( i in 1:50 )
+    abline( a=post$a[i] , b=post$b[i] , col=col.alpha("black",0.3) )
+#there is some uncertainity, but nevertheless the realtionship between ADOS and VerbalIQ seems to be always a negative one, so we think our model is good.
+
+modelVerb <- brms::bf("ADOS ~ VerbalIQ")
+brm_modverb <- brm(
+  modelVerb, 
+  prior = c(
+    prior(normal(0, 5), class = "Intercept"),
+    prior(normal(-0.1, 5), class = "b"), 
+    prior(uniform(0, 5), class = "sigma")),
+  data = VerbalIQ_scale, 
+  cores = 4, iter = 4000, warmup = 2000,
+  sample_prior = TRUE #added for later use. 
+)
+
+#Posterior Predictive Check
+pp_check(brm_modverb, nsamples = 100)
+#looking pretty good, the simulated data are somewhat consistent with the actual data, at least approximately
+
+
+
+
+```
+
+
+#1.2. Non Verbal IQ and ADOS
+```{r 1.2. inspecting data}
+
+dens(d1$NonVerbalIQ)
+
+```
+This is Gaussian "enough" for us.
+Mean around 27 with sd 15, we will scale it though, to be able to set somewhat sensible priors without looking at the data
+
+```{r 1.2. building and plotting model + quality check}
+
+###SCALING 
+NonVerbalIQ_scale <- d1
+NonVerbalIQ_scale$NonVerbalIQ <- scale(d1$NonVerbalIQ)
+NonVerbalIQ_scale$ADOS <- scale(d1$ADOS)
+#Densitiy Plot
+dens(NonVerbalIQ_scale$ADOS)
+
+###BUILDING THE MODEL
+#NonVerbalIQ
+nonverbal_m <- rethinking::map(
+  alist(
+    ADOS ~ dnorm (mu, sigma),
+    mu <- a + b* NonVerbalIQ,
+    a ~ dnorm (0, 5), #same reasons as in model one, see above
+    b ~ dnorm (-0.1, 5),
+    sigma ~ dunif (0, 5)
+  ), 
+  data = NonVerbalIQ_scale)
+
+#MAP Estimates
+precis(nonverbal_m)
+
+#PLOTTING 
+#Plot 1
+plot(ADOS ~ NonVerbalIQ, data = NonVerbalIQ_scale)
+abline(a=coef(nonverbal_m)["a"], b=coef(nonverbal_m)["b"])
+
+#Plot 2
+post <- extract.samples(nonverbal_m)
+post[1:5,] #expecting five rows
+#function
+N <- 30
+dN <- NonVerbalIQ_scale[ 1:N , ]
+# extract 20 samples from the posterior
+post <- extract.samples( nonverbal_m , n=50 )
+# display raw data and sample size
+plot( dN$NonVerbalIQ , dN$ADOS,
+    xlim=range(NonVerbalIQ_scale$NonVerbalIQ) , ylim=range(NonVerbalIQ_scale$ADOS) ,
+    col=rangi2 , xlab="NonVerbalIQ" , ylab="ADOS" )
+mtext(concat("N = ",N))
+# plot the lines, with transparency
+for ( i in 1:50 )
+    abline( a=post$a[i] , b=post$b[i] , col=col.alpha("black",0.3) )
+
+modelNonVerb <- brms::bf("ADOS ~ NonVerbalIQ")
+brm_mod2 <- brm(
+  modelNonVerb, 
+  prior = c(
+    prior(normal(0, 5), class = "Intercept"),
+    prior(normal(-0.1, 5), class = "b"), 
+    prior(uniform(0, 5), class = "sigma")),
+  data = NonVerbalIQ_scale, 
+  cores = 4, iter = 4000, warmup = 2000,
+  sample_prior = TRUE #added for later use. 
+)
+
+#Posterior Predictive Check
+pp_check(brm_mod2, nsamples = 100)
+#looking good enough for us, estimated data goes a little wild when it comes to the peak but, it looks somewhat like the actual data without being essentially the same, which we wouldn't want
+
+
+```
+
+
+```{r SOCIAL IQ & ADOS}
+
+#SCALING
+SocialIQ_scale <- d1
+SocialIQ_scale$SocialIQ <- scale(d1$SocialIQ)
+SocialIQ_scale$ADOS <- scale(d1$ADOS)
+
+#DENSITY PLOT
+dens(SocialIQ_scale$ADOS)
+
+
+#BUILDING THE MODEL
+#Social IQ
+social_m <- rethinking::map(
+  alist(
+    ADOS ~ dnorm (mu, sigma),
+    mu <- a + b* SocialIQ,
+    a ~ dnorm (0, 5), #see VerbalIQ model for reasoning about priors
+    b ~ dnorm (-0.1, 5), 
+    sigma ~ dunif (0, 5)
+  ), 
+  data = SocialIQ_scale)
+
+#Estimates
+precis(social_m)
+
+###PLOTTING
+##PLot 1
+plot(ADOS ~ SocialIQ, data = SocialIQ_scale)
+abline(a=coef(social_m)["a"], b=coef(social_m)["b"])
+
+##Plot2
+post <- extract.samples(social_m)
+post[1:5,] #expecting five rows
+#function
+N <- 30
+dN <- SocialIQ_scale[ 1:N , ]
+#extract 20 samples from the posterior
+post <- extract.samples( social_m , n=50 )
+#display raw data and sample size
+plot( dN$SocialIQ , dN$ADOS,
+    xlim=range(SocialIQ_scale$SocialIQ) , ylim=range(SocialIQ_scale$ADOS) ,
+    col=rangi2 , xlab="SocialIQ" , ylab="ADOS" )
+mtext(concat("N = ",N))
+# plot the lines, with transparency
+for ( i in 1:50 )
+    abline( a=post$a[i] , b=post$b[i] , col=col.alpha("black",0.3) )
+
+
+#brms model so we can pp_check
+modelSocial <- brms::bf("ADOS ~ SocialIQ")
+brm_mod3 <- brm(
+  modelSocial, 
+  prior = c(
+    prior(normal(0, 5), class = "Intercept"),
+    prior(normal(-0.1, 5), class = "b"), 
+    prior(uniform(0, 5), class = "sigma")),
+  data = SocialIQ_scale, 
+  cores = 4, iter = 4000, warmup = 2000,
+  sample_prior = TRUE #added for later use. 
+)
+
+#Posterior Predictive Check
+pp_check(brm_mod3, nsamples = 100)
+#looking good enough, some wildness and different peaks, but okay nok
+
+```
+
+
+##Task 2
+2. Do the different aspects of IQ account for different portions of the variance in ADOS?
+
+2.1. Does it make sense to have all IQ measures in the same model? First write a few lines answering the question and motivating your answer, including a discussion as to what happens when you put all of them in the same model. Then build a model following your answer. If your answer is "no", you are not free, you still have to answer: are there alternative ways of answering the question?
+
+2.2. Build the model, assess its quality, write a few lines interpreting the results.
+```{r 2.2. model building}
+library(rethinking)
+library(brms)
+library(bayesplot)
+
+##SCALING #all the variables before building the model
+d6 <- d1
+d6$VerbalIQ <- base::scale(d1$VerbalIQ)
+d6$NonVerbalIQ <- base::scale(d1$NonVerbalIQ)
+d6$SocialVerbalIQ <- base::scale(d1$SocialIQ)
+d6$ADOS <- scale(d1$ADOS)
+d6 <- base::subset(d6, d6$ChildID > 1) #getting rid of that annyoing kid with NAs
+
+##Building the Model with all IQ scores
+m4 <- rethinking::map( 
+  alist(
+ADOS ~ dnorm( mu , sigma ) ,
+mu <- a + v*VerbalIQ  + nv* NonVerbalIQ + s*SocialIQ , 
+a ~ dnorm( 1 , 5 ) ,
+v ~ dnorm( -0.1 , 5 ) ,
+nv ~ dnorm( -0.1 , 5 ) ,
+s ~ dnorm( -0.1, 5 ) ,
+sigma ~ dunif( 0 , 5 )
+),
+data=d6 )
+
+#Model Estimates
+precis(m4)
+#89% of n's probability lies between -2.86 and -0.55 suggesting that values close to zero and or above are not compatible, it looks like
+#s seams to have little effect extremly close to zero (approaching from both side 89% of the probability lie between -0.07 and 0.08) and surprisingly a positive effect ?
+#v and nv have negative effects of about the same size
+
+#Visualizing MAP values
+plot(precis(m4))
+
+
+##Model in brms
+#Building the model in brm as well, so we can do a beautiful pp_check
+model <- brms::bf("ADOS ~ VerbalIQ + NonVerbalIQ + SocialVerbalIQ")
+brm_mod8 <- brm(
+  model, 
+  prior = c(
+    prior(normal(0, 5), class = "Intercept"),
+    prior(normal(-0.1, 5), class = "b"), 
+    prior(uniform(0, 5), class = "sigma")),
+  data = d6, 
+  cores = 4, iter = 4000, warmup = 2000,
+  sample_prior = TRUE #added for later use. 
+)
+
+#Posterior Predictive Check
+pp_check(brm_mod8, nsamples = 100)
+#
+
+
+```
+
+
+```{r 2.2 correlation between measures}
+
+##Verbal and Social IQ
+cor.test(d1$VerbalIQ, d1$SocialIQ, method = "pearson") #0.5450814 
+(0.5450814)^2 #R^2 = 0.2971137
+
+##Verbal and Nonverbal IQ
+cor.test(d1$NonVerbalIQ, d1$VerbalIQ, method = "pearson") #0.7085501
+(0.7085501)^2 #R^2 = 0.5020432
+
+##Nonverbal and Social IQ
+cor.test(d1$NonVerbalIQ, d1$SocialIQ, method = "pearson") #0.396656
+(0.396656)^2 #R^2 = 0.157336
+
+#Scatterplot Matrix
+rethinking::pairs(~ SocialVerbalIQ + VerbalIQ + NonVerbalIQ , data= d6, 
+   main="Simple Scatterplot Matrix")
+
+```
+All measure are correlated and especially Verbal IQ and NonVerbal IQ seem to share at least 50% of their variance, explaining why our model looks very similar to the ones in Task 1, where we only used one predictor
+
+
+#Task 3
+3. Let's now include also the TD children. Does it make sense to ask whether IQ and ADOS are related? Motivate your answer. In any case, if you wanted to build a model to answer that question, which model would you build? Run the model, assess its quality, write a few lines interpreting the results.
+# Yes: ASD is not binary. Some children might lean towards ASD, but be categorized TD.
+#ADOS is, afterall, symptom severity. A continunous scale. We are interested in seeing ADOS predicting IQ [thus, IQ ~ ADOS]
+
+We certainly expect a relationship between IQ and ADOS, however we might run into problems because the ADOS scale is limited to >= 0, so almost every TD kid will end up at ADOS = 0, creating a floor effect.
+
+
+```{r }
+
+data_3 <- d3
+data_3 <- subset(d3, d3$VerbalIQ > 0)
+
+#SCALING
+data_3$VerbalIQ_scale <- base::scale(data_3$VerbalIQ)
+data_3$NonVerbalIQ_scale <- base::scale(data_3$NonVerbalIQ)
+data_3$SocialIQ_scale <-base::scale(data_3$SocialIQ)
+data_3$ADOS_scale <- base::scale(data_3$ADOS)
+
+#DENSITY PLOT
+rethinking::dens(data_3$VerbalIQ_scale)
+
+
+#VERBAL IQ
+M_IQ <- rethinking::map(
+  alist(
+    VerbalIQ_scale ~ dnorm (mu, sigma),
+    mu <- a + b* ADOS_scale,
+    a ~ dnorm (0, 5),
+    b ~ dnorm (-0.1, 5), #expecting a negative relationship
+    sigma ~ dunif (0, 5) 
+  ), 
+  data = data_3)
+
+#MAP Values
+precis(M_IQ)
+#relatively small negative relationship it seems
+
+#PLOTTING
+#Plot 1 - Model with mean posterior values against actual data 
+plot(VerbalIQ_scale ~ ADOS_scale, data = data_3)
+abline(a=coef(M_IQ)["a"], b=coef(M_IQ)["b"])
+
+#Plot 2
+post <- extract.samples(M_IQ)
+post[1:5,] #expecting five rows
+#function
+N <- 50
+dN <- data_3[ 1:N , ]
+# extract 20 samples from the posterior
+post <- extract.samples( M_IQ , n=50 )
+# display raw data and sample size
+plot( dN$ADOS_scale , dN$VerbalIQ_scale,
+    xlim=range(data_3$ADOS_scale) , ylim=range(data_3$VerbalIQ_scale) ,
     col=rangi2 , xlab="ADOS" , ylab="VerbalIQ" )
 mtext(concat("N = ",N))
 # plot the lines, with transparency
 for ( i in 1:50 )
     abline( a=post$a[i] , b=post$b[i] , col=col.alpha("black",0.3) )
 
+#Okay, at this point we are reconsidering our linear choice, but we experience a floor effect, which might be possible to work around with a poisson model
+
+models <- brms::bf("VerbalIQ_scale ~ ADOS")
+brm_modelll <- brm(
+  models, 
+  prior = c(
+    prior(normal(0, 5), class = "Intercept"),
+    prior(normal(-0.1, 5), class = "b"), 
+    prior(uniform(0, 5), class = "sigma")),
+  data = data_3, 
+  cores = 4, iter = 4000, warmup = 2000,
+  sample_prior = TRUE #added for later use. 
+)
+
+#Posterior Predictive Check
+pp_check(brm_modelll, nsamples = 100)
+#looking okay
 
 ```
 
 
 
+``` {r Social IQ ~ ADOS including TD}
 
-#1.2. Non Verbal IQ and ADOS
-```{r 1.2. inspecting data}
-dens(d1$NonVerbalIQ)
-
-dens(d2$NonVerbalIQ)
-
-```
-This is Gaussian "enough" for us.
-Mean around 27 with sd 15
-
-```{r 1.2. building and plotting model + quality check}
-#simple linear to get an idea of the nonVerbalIQ-ADOS relationship
-lm(NonVerbalIQ ~ ADOS, d1) #slope=-0.67
-
-#plotting priors
-curve(dnorm (x, 26, 10), from= 0, to= 50)
-
-#model-building
-NonVerbalIQ_m <- rethinking::map(
+N_IQ <- rethinking::map2stan(
   alist(
-    NonVerbalIQ ~ dnorm (mu, sigma),
-    mu <- a + b* ADOS,
-    a ~ dnorm (26, 10),
-    b ~ dnorm (-1, 0.9 ),
-    sigma ~ dunif (0, 30) #confusion
+    NonVerbalIQ_scale ~ dnorm (mu, sigma),
+    mu <- a + b* ADOS_scale,
+    a ~ dnorm (0, 5),
+    b ~ dnorm (-0.1, 5), #expecting a negative relationship
+    sigma ~ dunif (0, 5) 
   ), 
-  data = d1)
+  data = data_3)
 
-precis(NonVerbalIQ_m)
+#MAP Values
+precis(N_IQ)
+#our beta has both a great amount of values below and above zero, that doesn't look to good
 
-#plotting
-  plot(NonVerbalIQ ~ ADOS , data=d1 )
-  abline( a=coef(nonVerbalIQ_m)["a"] , b=coef(nonVerbalIQ_m)["b"] )
-#the line is the most plausible line. We want to know the uncertainty
+#Plot 1 - Model with mean posterior values against actual data 
+plot(NonVerbalIQ_scale ~ ADOS_scale, data = data_3)
+abline(a=coef(N_IQ)["a"], b=coef(N_IQ)["b"])
 
-
-```
-
-
-```{r 1.2 adding uncertainty around mean}
- post <- extract.samples(NonVerbalIQ_m)
- post[1:5,] #expecting five rows
- 
- 
- #function
-N <- 50
-dN <- d1[ 1:N , ]
-NonVerbalIQ_m <- rethinking::map(
-  alist(
-    NonVerbalIQ ~ dnorm (mu, sigma),
-    mu <- a + b* ADOS,
-    a ~ dnorm (27, 15),
-    b ~ dnorm (-1, 0.9 ),
-    sigma ~ dunif (0, 30) #confusion
-  ), 
-  data = d1)
-
+#Plot 2
+post <- extract.samples(N_IQ)
+post[1:5,] #expecting five rows
+#function
+N <- 70
+dN <- data_3[ 1:N , ]
 # extract 20 samples from the posterior
-post <- extract.samples( NonVerbalIQ_m , n=50 )
+post <- extract.samples( N_IQ , n=50 )
 # display raw data and sample size
-plot( dN$ADOS , dN$NonVerbalIQ,
-    xlim=range(d1$ADOS) , ylim=range(d1$NonVerbalIQ) ,
+plot( dN$ADOS_scale , dN$NonVerbalIQ_scale,
+    xlim=range(data_3$ADOS_scale) , ylim=range(data_3$NonVerbalIQ_scale) ,
     col=rangi2 , xlab="ADOS" , ylab="NonVerbalIQ" )
 mtext(concat("N = ",N))
 # plot the lines, with transparency
 for ( i in 1:50 )
     abline( a=post$a[i] , b=post$b[i] , col=col.alpha("black",0.3) )
+#looks like it certainty about whether it is a positive or negative relationship is not given
 
+
+n_model <- brms::bf("NonVerbalIQ_scale ~ ADOS")
+brm_modelln <- brm(
+  n_model, 
+  prior = c(
+    prior(normal(0, 5), class = "Intercept"),
+    prior(normal(-0.1, 5), class = "b"), 
+    prior(uniform(0, 5), class = "sigma")),
+  data = data_3, 
+  cores = 4, iter = 4000, warmup = 2000,
+  sample_prior = TRUE #added for later use. 
+)
+
+#Posterior Predictive Check
+pp_check(brm_modelln, nsamples = 100)
+#looks good
 
 ```
 
 
-1.3. Social IQ and ADOS
-```{r 1.3. inspecting data}
-dens(d1$SocialIQ)
-
-```
-
-
-```{r 1.3. social IQ and ADOS}
-#testing general tendency
-lm(SocialIQ ~ ADOS, d1) #slope=-1.64
-
-#plotting priors #a
-curve(dnorm (x, 75, 15), from= 40, to= 110)
-
-#model-building
-SocialIQ_m <- rethinking::map(
+``` {r Social IQ ~ ADOS including TD}
+#SOCIAL IQ
+S_IQ <- rethinking::map2stan(
   alist(
-    SocialIQ ~ dnorm (mu, sigma),
-    mu <- a + b* ADOS,
-    a ~ dnorm (75, 15), #mean around 75, sd 15
-    b ~ dnorm (-1, 0.9 ), #generalized linear slope is -1.64
-    sigma ~ dunif (0, 30) #meh
+    SocialIQ_scale ~ dnorm (mu, sigma),
+    mu <- a + b* ADOS_scale,
+    a ~ dnorm (0, 5), #ADOS can't be below 0, and 
+    b ~ dnorm (-0.1, 5), #expecting a negative relationship
+    sigma ~ dunif (0, 5) 
   ), 
-  data = d1)
-
-precis(SocialIQ_m)
-
-#plotting
-plot(SocialIQ ~ ADOS , data=d1 )
-abline( a=coef(SocialIQ_m)["a"] , b=coef(SocialIQ_m)["b"] )
-#the line is the most plausible line. We want to know the uncertainty
+ data = data_3 )
 
 
-```
+#MAP Values
+precis(S_IQ)
 
-```{r 1.3. adding uncertainty around mean}
- post <- extract.samples(SocialIQ_m)
- post[1:5,] #expecting five rows
- 
- 
- #function
-N <- 50
-dN <- d1[ 1:N , ]
-NonVerbalIQ_m <- rethinking::map(
-  alist(
-    NonVerbalIQ ~ dnorm (mu, sigma),
-    mu <- a + b* ADOS,
-    a ~ dnorm (75, 15),
-    b ~ dnorm (-1, 0.9 ),
-    sigma ~ dunif (0, 30) #confusion
-  ), 
-  data = d1)
+#Plot 1
+plot(SocialIQ_scale ~ ADOS_scale, data = data_3)
+abline(a=coef(S_IQ)["a"], b=coef(S_IQ)["b"])
 
+#Plot 2
+post <- extract.samples(S_IQ)
+post[1:5,] #expecting five rows
+#function
+N <- 70
+dN <- data_3[ 1:N , ]
 # extract 20 samples from the posterior
-post <- extract.samples( NonVerbalIQ_m , n=50 )
+post <- extract.samples( S_IQ , n=50 )
 # display raw data and sample size
-plot( dN$ADOS , dN$NonVerbalIQ,
-    xlim=range(d1$ADOS) , ylim=range(d1$NonVerbalIQ) ,
-    col=rangi2 , xlab="ADOS" , ylab="NonVerbalIQ" )
+plot( dN$ADOS_scale , dN$SocialIQ_scale,
+    xlim=range(data_3$ADOS_scale) , ylim=range(data_3$SocialIQ_scale) ,
+    col=rangi2 , xlab="ADOS" , ylab="VerbalIQ" )
 mtext(concat("N = ",N))
 # plot the lines, with transparency
 for ( i in 1:50 )
     abline( a=post$a[i] , b=post$b[i] , col=col.alpha("black",0.3) )
 
+#once again brmsing for another pp_check
+s_model <- brms::bf("SocialIQ ~ ADOS")
+brm_modell <- brm(
+  s_model, 
+  prior = c(
+    prior(normal(0, 100), class = "Intercept"),
+    prior(normal(-0.1, 100), class = "b"), 
+    prior(uniform(0, 100), class = "sigma")),
+  data = data_3, 
+  cores = 4, iter = 4000, warmup = 2000,
+  sample_prior = TRUE #added for later use. 
+)
 
-```
-
-
-
-2. Do the different aspects of IQ account for different portions of the variance in ADOS?
-
-2.1. Does it make sense to have all IQ measures in the same model? First write a few lines answering the question and motivating your answer, including a discussion as to what happens when you put all of them in the same model. Then build a model following your answer. If your answer is "no", you are not free, you still have to answer: are there alternative ways of answering the question?
-
-2.2. Build the model, assess its quality, write a few lines interpreting the results.
-```{r 2.2. model}
-
-# 2. correlation between measures 
-#Verbal and social
-cor.test(d$VerbalIQ, d$SocialIQ, method = "pearson")
-
-(0.6102297)^2
-
-scatter1 <- ggplot(d, aes(VerbalIQ, SocialIQ)) + geom_point() +
-geom_smooth(method = "lm") 
-scatter1
-
-#Verbal and nonverbal 
-cor.test(d$NonVerbalIQ, d$VerbalIQ, method = "pearson")
-
-(0.6759356)^2
-
-scatter2 <- ggplot(d, aes(VerbalIQ, NonVerbalIQ)) + geom_point() +
-geom_smooth(method = "lm") 
-scatter2
-
-#Nonverbal and social
-cor.test(d$NonVerbalIQ, d$SocialIQ, method = "pearson")
-
-(0.3747165)^2
-
-scatter3 <- ggplot(d, aes(NonVerbalIQ, SocialIQ)) + geom_point() +
-geom_smooth(method = "lm") 
-scatter3
+#Posterior Predictive Check
+pp_check(brm_modell, nsamples = 100)
+#looks okay :) 
 
 
-# 2.2 Model with all measures 
-m2.2 <- map( 
-  alist(
-ADOS ~ dnorm( mu , sigma ) ,
-mu <- a + v*VerbalIQ + nv*NonVerbalIQ + s*SocialIQ , 
-a ~ dnorm( 10 , 100 ) ,
-v ~ dnorm( -1 , 0.9 ) ,
-nv ~ dnorm( -1 , 0.9 ) ,
-s ~ dnorm( -1 , 0.9 ) ,
-sigma ~ dunif( 0 , 30 )
-),
-data=d )
 
-precis(m2.2)
+#WHUT THE FUCK HAPPENED HERE
+#We said goodbye to Bayesian Stats????
 
-plot( precis(m2.2) )
+#Linear Model
+lol <- lm(VerbalIQ ~ ADOS, data)
 
-
-```
-
-3. Let's now include also the TD children. Does it make sense to ask whether IQ and ADOS are related? Motivate your answer. In any case, if you wanted to build a model to answer that question, which model would you build? Run the model, assess its quality, write a few lines interpreting the results.
-# Yes: ASD is not binary. Some children might lean towards ASD, but be categorized TD.
-#ADOS is, afterall, symptom severity. A continunous scale. We are interested in seeing ADOS predicting IQ [thus, IQ ~ ADOS]
-
-```{r}
-data <- d
-lol <- lm(VerbalIQ~ADOS,data)
-lol1 <- ggplot(data, aes(x=VerbalIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD)) + geom_smooth(method = "lm",formula = y ~ x + I(x^2))
+#VerbalIQ
+lol1 <- ggplot(data, aes(x=VerbalIQ, y= ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD)) + geom_smooth(method = "lm", formula = y ~ x)
 lol1 + scale_x_continuous(limits = c(5, 35))
 #Floor effect for variation in the TD group - Can't be "minus" autistic
 
+#SocialIQ
 loll <- lm(SocialIQ~ADOS,data)
 lol2 <- ggplot(data, aes(x=SocialIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD)) + geom_smooth(method = "lm",formula = y ~ x + I(x^2))
 lol2 + scale_y_continuous(limits = c(0, 30))
-#
+
+#NonVerbalIQ
 lolll <- lm(NonVerbalIQ~ADOS,data)
 lol3 <- ggplot(data, aes(x=NonVerbalIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD),se = F) + geom_smooth(method = "lm")
 lol3 + scale_x_continuous(limits = c(12, 36))
+
 ```
 
 4. Let's discuss contents:
 4.1. You have three scores for IQ, do they show shared variance? Is that the same in TD and ASD? What does that tell us about IQ?
 ```{r 4.1. Testing shared variance in IQ-scores}
 #Testing correlation and covariates
-data.1 <- d1
-data_TD <- d2
 
-cor.test(data.1$VerbalIQ, data.1$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
-cor.test(data.1$VerbalIQ, data.1$NonVerbalIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
-cor.test(data.1$NonVerbalIQ, data.1$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
-0.61^2 #0.37
-0.68^2 #0.46
-0.37^2 # 0.14
-cor.test(data_TD$VerbalIQ, data_TD$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
-cor.test(data_TD$VerbalIQ, data_TD$NonVerbalIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
-cor.test(data_TD$NonVerbalIQ, data_TD$SocialIQ,method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
+#see 2.2 for correlations between measures in ASD kids
+
+#TD kids
+cor.test(d2$VerbalIQ, d2$SocialIQ, method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
 0.20^2 #0.04
+cor.test(d2$VerbalIQ, d2$NonVerbalIQ, method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
 0.55^2 #0.3
+cor.test(d2$NonVerbalIQ, d2$SocialIQ, method = c("pearson", "kendall", "spearman"), exact = NULL, conf.level = 0.95)
 0.06^2 #0.004
-
-
 
 
 ```
 
 4.2. You have explored the relation between IQ and ADOS. How do you explain that relation from a cognitive perspective? N.B. You can present alternative hypotheses.
-# A4.2. 
 
 
 
@@ -346,3 +594,7 @@ cor.test(data_TD$NonVerbalIQ, data_TD$SocialIQ,method = c("pearson", "kendall", 
 5.2. We know that IQ has an estimated measurement error of 2.12. How would you include that? 
 
 
+#NOTES TO SELF
+if we were to compare models
+simply use compare() and we'll get WAIC and stuff
+plot(marginal_effects(m4, points = TRUE))
