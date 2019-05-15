@@ -356,7 +356,7 @@ All measure are correlated and especially Verbal IQ and NonVerbal IQ seem to sha
 We certainly expect a relationship between IQ and ADOS, however we might run into problems because the ADOS scale is limited to >= 0, so almost every TD kid will end up at ADOS = 0, creating a floor effect.
 
 
-```{r }
+```{r Verbal IQ ~ ADOS }
 
 data_3 <- d3
 data_3 <- subset(d3, d3$VerbalIQ > 0)
@@ -430,7 +430,7 @@ pp_check(brm_modelll, nsamples = 100)
 
 
 
-``` {r Social IQ ~ ADOS including TD}
+``` {r Non-Verbal IQ ~ ADOS including TD}
 
 N_IQ <- rethinking::map2stan(
   alist(
@@ -503,6 +503,7 @@ S_IQ <- rethinking::map2stan(
 
 #MAP Values
 precis(S_IQ)
+#rhat should approach from above 1 to 1 :) looking good
 
 #Plot 1
 plot(SocialIQ_scale ~ ADOS_scale, data = data_3)
@@ -543,27 +544,6 @@ pp_check(brm_modell, nsamples = 100)
 #looks okay :) 
 
 
-
-#WHUT THE FUCK HAPPENED HERE
-#We said goodbye to Bayesian Stats????
-
-#Linear Model
-lol <- lm(VerbalIQ ~ ADOS, data)
-
-#VerbalIQ
-lol1 <- ggplot(data, aes(x=VerbalIQ, y= ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD)) + geom_smooth(method = "lm", formula = y ~ x)
-lol1 + scale_x_continuous(limits = c(5, 35))
-#Floor effect for variation in the TD group - Can't be "minus" autistic
-
-#SocialIQ
-loll <- lm(SocialIQ~ADOS,data)
-lol2 <- ggplot(data, aes(x=SocialIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD)) + geom_smooth(method = "lm",formula = y ~ x + I(x^2))
-lol2 + scale_y_continuous(limits = c(0, 30))
-
-#NonVerbalIQ
-lolll <- lm(NonVerbalIQ~ADOS,data)
-lol3 <- ggplot(data, aes(x=NonVerbalIQ, y=ADOS, color=ASD))+geom_point()+geom_smooth(method = "lm",aes(group = ASD),se = F) + geom_smooth(method = "lm")
-lol3 + scale_x_continuous(limits = c(12, 36))
 
 ```
 
